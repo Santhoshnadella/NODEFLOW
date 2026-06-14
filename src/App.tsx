@@ -1,0 +1,731 @@
+import React, { useState, useCallback, useEffect } from 'react';
+import {
+  ReactFlow,
+  addEdge,
+  Controls,
+  Connection,
+  Edge,
+  Node,
+  useNodesState,
+  useEdgesState,
+  MiniMap,
+  Background,
+  BackgroundVariant
+} from '@xyflow/react';
+import { Database, Sparkles, Box, GraduationCap, Activity } from 'lucide-react';
+import '@xyflow/react/dist/style.css';
+
+import NodeLibrary from './components/NodeLibrary';
+import BaseNode from './components/BaseNode';
+import ChatNode from './components/ChatNode';
+import Inspector from './components/Inspector';
+import StatusBar from './components/StatusBar';
+import ContextMenu from './components/ContextMenu';
+import ErrorBoundary from './components/ErrorBoundary';
+import NodeBuilder from './components/NodeBuilder';
+import { useBackend } from './hooks/useBackend';
+import { PREMADE_PIPELINES } from './data/premadePipelines';
+import { NODE_TEMPLATES } from './data/nodeTemplates';
+import { DEEP_DIVE_CONTENT } from './data/deepDiveContent';
+import './styles/App.css';
+
+const nodeTypes = {
+  baseNode: BaseNode,
+  chatNode: ChatNode,
+};
+
+const initialNodes: Node<any>[] = [];
+const initialEdges: Edge[] = [];
+
+const App = () => {
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [kidMode, setKidMode] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(true);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showNodeBuilder, setShowNodeBuilder] = useState(false);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(false);
+  const [communityPipelines, setCommunityPipelines] = useState<any[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [selectedMode, setSelectedMode] = useState('dev');
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [tooltip, setTooltip] = useState<{ visible: boolean; x: number; y: number; data: any }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    data: null,
+  });
+  
+  const { 
+    runPipeline, stopPipeline, isRunning, progress, stats, 
+    nodeStatuses, nodeResults, chatHistories, generatedPipelineId, runHistory, clearHistory, isConnected, sendMessage, sendChatMessage, profilerStats 
+  } = useBackend();
+
+  const loadPipeline = useCallback((templateId: string) => {
+    let pipeline = PREMADE_PIPELINES.find((p) => p.id === templateId);
+    if (!pipeline) {
+      pipeline = communityPipelines.find((p) => p.id === templateId);
+    }
+    if (!pipeline) return;
+
+    if (telemetryEnabled) {
+      console.log(`[Telemetry] Loaded pipeline template: ${templateId}`);
+    }
+
+    // Apply kidMode to each node's data and merge with official template data
+    const nodesWithMode = pipeline.nodes.map(node => {
+      const officialTemplate = NODE_TEMPLATES.find(t => t.label === node.data.label);
+      return {
+        ...node,
+        data: {
+          ...(officialTemplate?.data || {}),
+          ...node.data,
+          kidMode
+        }
+      };
+    });
+
+    setNodes(nodesWithMode);
+    setEdges(pipeline.edges);
+    setShowTemplates(false);
+  }, [setNodes, setEdges, kidMode, communityPipelines, telemetryEnabled]);
+
+  useEffect(() => {
+    if (generatedPipelineId) {
+      loadPipeline(generatedPipelineId);
+    }
+  }, [generatedPipelineId, loadPipeline]);
+
+  // Sync node statuses, results and chat histories into the nodes state
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          status: nodeStatuses[node.id] || 'idle',
+          result: nodeResults[node.id] || null,
+          chatHistory: chatHistories[node.id] || node.data.chatHistory || [],
+          onSendMessage: (content: string) => sendChatMessage(node.id, content),
+        },
+      }))
+    );
+  }, [nodeStatuses, nodeResults, chatHistories, setNodes, sendChatMessage]);
+
+  const onConnect = useCallback(
+    (params: Connection) => {
+      const sourceNode = nodes.find(n => n.id === params.source);
+      const targetNode = nodes.find(n => n.id === params.target);
+      
+      if (sourceNode && targetNode) {
+        const sourcePort = sourceNode.data.outputs?.find((o: any) => o.id === params.sourceHandle);
+        const targetPort = targetNode.data.inputs?.find((i: any) => i.id === params.targetHandle);
+        
+        if (sourcePort && targetPort && sourcePort.type !== targetPort.type && sourcePort.type !== 'any' && targetPort.type !== 'any') {
+          console.warn(`Type mismatch: ${sourcePort.type} -> ${targetPort.type}`);
+          // Optional: block connection
+          // return;
+        }
+      }
+      setEdges((eds) => addEdge(params, eds));
+    },
+    [nodes, setEdges]
+  );
+
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      const type = event.dataTransfer.getData('application/reactflow');
+      const templateStr = event.dataTransfer.getData('application/nodeflow-template');
+      
+      if (!type || !templateStr) return;
+
+      const template = JSON.parse(templateStr);
+      const position = { x: event.clientX - 300, y: event.clientY - 100 };
+
+      const newNode: Node = {
+        id: `${type}-${Date.now()}`,
+        type,
+        position,
+        data: { ...template, kidMode },
+      };
+
+      setNodes((nds) => nds.concat(newNode));
+    },
+    [setNodes, kidMode]
+  );
+
+  const onPaneContextMenu = useCallback(
+    (event: any) => {
+      event.preventDefault();
+      setMenu({ x: event.clientX, y: event.clientY });
+    },
+    [setMenu]
+  );
+
+  const addNodeAtPos = useCallback((template: any) => {
+    if (!menu) return;
+    const newNode: Node = {
+      id: `${template.type}-${Date.now()}`,
+      type: template.type,
+      position: { x: menu.x - 300, y: menu.y - 100 },
+      data: { ...template.data, kidMode },
+    };
+    setNodes((nds) => nds.concat(newNode));
+    setMenu(null);
+  }, [menu, setNodes, kidMode]);
+
+
+
+  const onNodeMouseEnter = useCallback((event: React.MouseEvent, node: Node) => {
+    const rect = (event.target as HTMLElement).getBoundingClientRect();
+    setTooltip({
+      visible: true,
+      x: rect.right + 10,
+      y: rect.top,
+      data: node.data,
+    });
+  }, []);
+
+  const onNodeMouseLeave = useCallback(() => {
+    setTooltip((prev) => ({ ...prev, visible: false }));
+  }, []);
+
+  const onParameterChange = useCallback((nodeId: string, key: string, value: any) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              parameters: {
+                ...node.data.parameters,
+                [key]: value,
+              },
+            },
+          };
+        }
+        return node;
+      })
+    );
+  }, [setNodes]);
+
+  const [aiRequirement, setAiRequirement] = useState('');
+  const [showModelManager, setShowModelManager] = useState(false);
+  const [showDeepDive, setShowDeepDive] = useState<any>(null);
+  const [errorDiagnosis, setErrorDiagnosis] = useState<string | null>(null);
+
+  const syncCommunityTemplates = async () => {
+    setIsSyncing(true);
+    try {
+      await new Promise(r => setTimeout(r, 1500)); // Simulate network request
+      const mockGitHubData = [
+        {
+          id: 'github-stable-diffusion',
+          title: 'Stable Diffusion LoRA (Community)',
+          description: 'Community contributed SD fine-tuning pipeline.',
+          nodes: [
+            { id: '1', type: 'baseNode', position: {x: 0, y: 0}, data: { label: 'Stable Diffusion', category: 'gen', parameters: {} } }
+          ],
+          edges: []
+        }
+      ];
+      setCommunityPipelines(mockGitHubData);
+      if (telemetryEnabled) {
+         console.log("[Telemetry] Synced community templates from GitHub registry");
+      }
+    } catch (err) {
+      console.error("Failed to sync", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const generatePipelineFromAI = () => {
+    if (!aiRequirement.trim()) return;
+    sendMessage({ type: 'generate_pipeline', prompt: aiRequirement });
+    setAiRequirement('');
+  };
+
+  const startApp = (mode: string) => {
+    setSelectedMode(mode);
+    setKidMode(mode === 'kid');
+    setShowWelcome(false);
+    setOnboardingStep(1);
+  };
+
+  const savePipeline = () => {
+    const data = JSON.stringify({ version: '2.0.0', selectedMode, kidMode, nodes, edges }, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pipeline-${Date.now()}.nodeflow`;
+    a.click();
+  };
+
+  const loadPipelineFromFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = JSON.parse(e.target?.result as string);
+        let loadedNodes = parsed.nodes || [];
+        let loadedEdges = parsed.edges || [];
+        const version = parsed.version || '1.0.0';
+        
+        const modeToLoad = parsed.selectedMode || 'dev';
+        const isKid = parsed.kidMode !== undefined ? parsed.kidMode : modeToLoad === 'kid';
+        
+        setSelectedMode(modeToLoad);
+        setKidMode(isKid);
+        
+        // Ensure nodes have correct mode state
+        loadedNodes = loadedNodes.map((n: any) => ({
+          ...n,
+          data: { ...n.data, kidMode: isKid, selectedMode: modeToLoad }
+        }));
+
+        // Migration logic
+        if (version === '1.0.0') {
+          console.log('Migrating pipeline from v1 to v2');
+          loadedNodes = loadedNodes.map((n: any) => ({
+            ...n,
+            data: { ...n.data, schemaVersion: '2.0.0' }
+          }));
+        }
+
+        setNodes(loadedNodes);
+        setEdges(loadedEdges);
+      } catch (err) {
+        console.error('Failed to load pipeline:', err);
+        alert('Invalid .nodeflow file');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const exportToPython = () => {
+    if (telemetryEnabled) {
+      console.log(`[Telemetry] Exported pipeline to Python. Node count: ${nodes.length}`);
+    }
+    let script = "import pandas as pd\nimport numpy as np\nimport torch\n\n# --- Generated by NodeFlow ---\n\n";
+    
+    // Simple script generator based on nodes
+    nodes.forEach(node => {
+      const label = node.data.label;
+      const params = node.data.parameters || {};
+      
+      if (label === 'Load CSV') {
+        script += `df = pd.read_csv('${params.filePath || "data.csv"}')\n`;
+      } else if (label === 'Normalize') {
+        script += `df = (df - df.min()) / (df.max() - df.min())\n`;
+      } else if (label === 'Linear Regression') {
+        script += `from sklearn.linear_model import LinearRegression\nmodel = LinearRegression().fit(df.iloc[:,:-1], df.iloc[:,-1])\nprint('Model Trained!')\n`;
+      }
+    });
+
+    const blob = new Blob([script], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'pipeline.py';
+    a.click();
+  };
+
+  if (showWelcome) {
+    return (
+      <div className="welcome">
+        <div className="welcome-logo"><div className="welcome-logo-dot" />NodeFlow</div>
+        <p style={{ fontSize: '16px', color: '#8b90a8', textAlign: 'center', maxWidth: '480px', lineHeight: '1.6' }}>
+          Build <span style={{ color: '#8b85ff', fontWeight: 600 }}>AI · ML · DL · NLP · CV · GenAI</span> pipelines visually.<br />
+          No code required. 100% local. Runs on your machine.
+        </p>
+        <div className="welcome-modes">
+          <div className="welcome-mode" onClick={() => startApp('kid')}>
+            <div className="welcome-mode-icon">🧒</div>
+            <div className="welcome-mode-title">Kid Mode</div>
+            <div className="welcome-mode-sub">Grade 4–10<br />Guided & fun</div>
+          </div>
+          <div className="welcome-mode" onClick={() => startApp('student')}>
+            <div className="welcome-mode-icon">🎓</div>
+            <div className="welcome-mode-title">Student</div>
+            <div className="welcome-mode-sub">Learn the concepts<br />Light math</div>
+          </div>
+          <div className="welcome-mode" onClick={() => startApp('dev')}>
+            <div className="welcome-mode-icon">⚡</div>
+            <div className="welcome-mode-title">Developer</div>
+            <div className="welcome-mode-sub">Full control<br />All parameters</div>
+          </div>
+        </div>
+        <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
+          <button className="tb-btn primary" style={{ padding: '14px 40px', fontSize: '14px' }} onClick={() => startApp('dev')}>
+            Open Platform →
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text3)', fontSize: '12px' }}>
+            <input 
+              type="checkbox" 
+              id="telemetry" 
+              checked={telemetryEnabled} 
+              onChange={(e) => setTelemetryEnabled(e.target.checked)} 
+              style={{ cursor: 'pointer' }}
+            />
+            <label htmlFor="telemetry" style={{ cursor: 'pointer' }}>Opt-in to anonymous telemetry to help improve NodeFlow</label>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <ErrorBoundary>
+      {showNodeBuilder && (
+        <NodeBuilder 
+          onClose={() => setShowNodeBuilder(false)} 
+          onSave={(nodeDef) => {
+            console.log('Saved custom node:', nodeDef);
+            // In a real app, this would be saved to a database or local storage
+            // and appended to the NODE_TEMPLATES array dynamically.
+            setShowNodeBuilder(false);
+          }} 
+        />
+      )}
+      <div className="nodeflow-app">
+      <header className="app-header">
+        <div className="topbar-left">
+          <div className="logo">
+            <div className="logo-dot" />
+            NodeFlow
+          </div>
+          <div className="divider" />
+          <button className="top-btn" onClick={() => setShowTemplates(true)}>
+            <Box size={14} /> Templates
+          </button>
+          <button className="top-btn" onClick={() => setShowModelManager(true)}>
+            <Database size={14} /> Models
+          </button>
+                    <button className="top-btn" onClick={() => setShowNodeBuilder(true)}>
+            <Box size={14} /> Node Builder
+          </button>
+          <button className="top-btn" onClick={() => setShowHistory(true)}>
+            <Activity size={14} /> History
+          </button>
+        </div>
+
+        <div className="ai-requirement-bar">
+          <Sparkles size={14} className="sparkle-icon" />
+          <input 
+            type="text" 
+            placeholder="Describe your AI project (e.g., 'Detect cats in a video' or 'Build a chat bot')..." 
+            value={aiRequirement}
+            onChange={(e) => setAiRequirement(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && generatePipelineFromAI()}
+          />
+          <button className="ai-gen-btn" onClick={generatePipelineFromAI}>Generate</button>
+        </div>
+
+        <div className="topbar-right">
+          <button className={`tb-btn run ${isRunning ? 'danger' : ''}`} onClick={isRunning ? stopPipeline : () => {
+            if (telemetryEnabled) console.log(`[Telemetry] Running pipeline with ${nodes.length} nodes and ${edges.length} edges.`);
+            runPipeline(nodes, edges);
+          }}>
+            {isRunning ? '■ Stop' : '▶ Run'}
+          </button>
+          <button className="tb-btn" onClick={savePipeline}>Save</button>
+          <label className="tb-btn" style={{ cursor: 'pointer' }}>
+            Load
+            <input type="file" accept=".nodeflow" onChange={loadPipelineFromFile} style={{ display: 'none' }} />
+          </label>
+          <button className="tb-btn" onClick={exportToPython}>Export</button>
+                    <select 
+            className="tb-btn" 
+            value={selectedMode} 
+            onChange={(e) => {
+              const mode = e.target.value;
+              setSelectedMode(mode);
+              setKidMode(mode === 'kid');
+              setNodes(nds => nds.map(node => ({
+                ...node,
+                data: { ...node.data, kidMode: mode === 'kid', selectedMode: mode }
+              })));
+            }}
+            style={{ appearance: 'none', background: 'var(--bg2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer' }}
+          >
+            <option value="kid">Kid Mode</option>
+            <option value="student">Student Mode</option>
+            <option value="dev">Dev Mode</option>
+          </select>
+        </div>
+      </header>
+
+      <NodeLibrary />
+
+      <main className="canvas-area" style={{ position: 'relative', height: '100%' }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onNodeMouseEnter={onNodeMouseEnter}
+            onNodeMouseLeave={onNodeMouseLeave}
+            onPaneContextMenu={onPaneContextMenu}
+            onPaneClick={() => setMenu(null)}
+            nodeTypes={nodeTypes}
+            fitView
+            style={{ background: 'var(--bg1)' }}
+          >
+            <Background color="var(--border)" variant={BackgroundVariant.Dots} gap={20} size={1} />
+            <MiniMap 
+              style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '8px' }}
+              nodeColor={(n) => (n.data.category === 'cv' ? 'var(--cv)' : 'var(--accent)')}
+              maskColor="rgba(0,0,0,0.3)"
+            />
+            <Controls />
+          </ReactFlow>
+
+          {!isConnected && (
+            <div className="connection-overlay">
+              <div className="loader"></div>
+              <p>Connecting to Python Engine...</p>
+            </div>
+          )}
+
+        {tooltip.visible && tooltip.data && (
+          <div 
+            className="tooltip visible" 
+            style={{ left: tooltip.x, top: tooltip.y }}
+          >
+            <div className="tt-name">{tooltip.data.label}</div>
+            <div className="tt-summary">{tooltip.data.explanation?.what || "Advanced AI processing node."}</div>
+            
+            <div className="tt-section">How it works</div>
+            <div className="tt-summary">{tooltip.data.explanation?.how || "Processes inputs through optimized local engines."}</div>
+            
+            <div className="tt-section">What it gives</div>
+            <div className="tt-summary">{tooltip.data.explanation?.gives || "Refined data output."}</div>
+
+            <div className="tt-section">Child Analogy 🧒</div>
+            <div className="tt-analogy">
+              {tooltip.data.explanation?.analogy || "Like a smart robot helping you with your tasks!"}
+            </div>
+          </div>
+        )}
+
+        {showTemplates && (
+          <div className="template-gallery" style={{ 
+            position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.85)', 
+            display: 'flex', alignItems: 'center', justifyContent: 'center' 
+          }}>
+            <div style={{ background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: '16px', width: '800px', maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: '18px', fontWeight: 700, color: 'white' }}>Template Library</div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button className="tb-btn" onClick={syncCommunityTemplates} disabled={isSyncing}>
+                    {isSyncing ? 'Syncing...' : 'Sync GitHub Registry'}
+                  </button>
+                  <button onClick={() => setShowTemplates(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', padding: '20px 24px', overflowY: 'auto' }}>
+                {[...communityPipelines, ...PREMADE_PIPELINES].map((t) => (
+                  <div key={t.id} className="tg-card" style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: '16px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'white', marginBottom: '8px' }}>{t.title}</div>
+                    <div style={{ fontSize: '10px', color: 'var(--text3)', lineHeight: '1.5', marginBottom: '8px' }}>{t.description}</div>
+                    <button className="tg-load-btn" onClick={() => loadPipeline(t.id)} style={{ width: '100%', padding: '7px', background: 'var(--bg4)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', color: 'white', cursor: 'pointer' }}>Load template →</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <StatusBar 
+          isConnected={isConnected} 
+          stats={stats} 
+          nodeCount={nodes.length} 
+          edgeCount={edges.length} 
+        />
+      </main>
+
+      <Inspector 
+        selectedNode={nodes.find(n => n.selected) || null} 
+        onParameterChange={onParameterChange}
+        onShowDeepDive={(node) => setShowDeepDive(node)}
+      />
+
+      {menu && (
+        <ContextMenu 
+          x={menu.x} 
+          y={menu.y} 
+          onAddNode={addNodeAtPos} 
+          onClose={() => setMenu(null)} 
+        />
+      )}
+      {/* Modals */}
+      {onboardingStep > 0 && (
+        <div className="onboarding-overlay" style={{
+          position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <div className="onboarding-modal" style={{
+            background: 'var(--bg2)', border: '1px solid var(--accent)', borderRadius: '12px', padding: '24px', width: '400px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+          }}>
+            <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, color: 'white' }}>Create your first pipeline</h3>
+              <span style={{ fontSize: '12px', color: 'var(--text3)' }}>Step {onboardingStep} of 3</span>
+            </div>
+            
+            {onboardingStep === 1 && <p style={{ color: 'var(--text2)', lineHeight: '1.5' }}>Welcome to NodeFlow! Let's get started. You can build pipelines by dragging nodes from the library on the left.</p>}
+            {onboardingStep === 2 && <p style={{ color: 'var(--text2)', lineHeight: '1.5' }}>Don't want to build from scratch? Click <strong>Templates</strong> in the top bar or use the AI generator to load a pre-made pipeline.</p>}
+            {onboardingStep === 3 && <p style={{ color: 'var(--text2)', lineHeight: '1.5' }}>Once your pipeline is ready, click <strong>▶ Run</strong> in the top right to execute it. Happy building!</p>}
+            
+            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              {onboardingStep < 3 ? (
+                 <button className="tb-btn primary" onClick={() => setOnboardingStep(prev => prev + 1)}>Next →</button>
+              ) : (
+                 <button className="tb-btn primary" onClick={() => setOnboardingStep(0)}>Get Started</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeepDive && (
+        <div className="modal-overlay" onClick={() => setShowDeepDive(null)}>
+          <div className="deep-dive-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <GraduationCap size={18} color="var(--accent2)" />
+                <h2 style={{ fontSize: '16px', margin: 0 }}>Level 3: Deep Dive — {showDeepDive.data.label}</h2>
+              </div>
+              <button className="close-btn" onClick={() => setShowDeepDive(null)}>×</button>
+            </div>
+            <div className="modal-content">
+              <h3>Technical Overview</h3>
+              <p>{showDeepDive.data.explanation?.how}</p>
+              
+              <div className="math-block" style={{ background: 'var(--bg4)', padding: '20px', borderRadius: '8px', fontFamily: 'var(--font-mono)', margin: '20px 0' }}>
+                {DEEP_DIVE_CONTENT[showDeepDive.data.label]?.math || 'y = f(x, w, b)'}
+              </div>
+
+              <h3>Core Concepts</h3>
+              <ul style={{ color: 'var(--text2)', fontSize: '12px', paddingLeft: '20px' }}>
+                {DEEP_DIVE_CONTENT[showDeepDive.data.label]?.concepts.map((c: string) => <li key={c} style={{ marginBottom: '5px' }}>{c}</li>) || <li>Mathematical modeling</li>}
+              </ul>
+
+              <h3>Implementation Details</h3>
+              <p>{DEEP_DIVE_CONTENT[showDeepDive.data.label]?.implementation || 'This node is implemented using optimized local C++ and Python routines.'}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {showModelManager && (
+        <div className="modal-overlay" onClick={() => setShowModelManager(false)}>
+          <div className="deep-dive-modal" style={{ height: '500px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Database size={18} color="var(--accent2)" />
+                <h2 style={{ fontSize: '16px', margin: 0 }}>Model Manager</h2>
+              </div>
+              <button className="close-btn" onClick={() => setShowModelManager(false)}>×</button>
+            </div>
+            <div className="modal-content">
+              <table className="model-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)', fontSize: '12px' }}>
+                    <th style={{ padding: '10px' }}>Name</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ fontSize: '11px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <td style={{ padding: '10px' }}>yolov8n.pt</td>
+                    <td>Ultralytics</td>
+                    <td>6.2 MB</td>
+                    <td style={{ color: 'var(--green)' }}>Ready</td>
+                  </tr>
+                  <tr style={{ fontSize: '11px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <td style={{ padding: '10px' }}>llama-3-8b.gguf</td>
+                    <td>GGUF</td>
+                    <td>4.9 GB</td>
+                    <td style={{ color: 'var(--accent2)' }}>Downloading (45%)</td>
+                  </tr>
+                </tbody>
+              </table>
+              <button className="ai-gen-btn" style={{ marginTop: '20px', width: '100%' }}>Scan Local ~/nodeflow/models/</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHistory && (
+        <div className="modal-overlay" onClick={() => setShowHistory(false)}>
+          <div className="deep-dive-modal" style={{ height: '500px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Activity size={18} color="var(--accent2)" />
+                <h2 style={{ fontSize: '16px', margin: 0 }}>Experiment History</h2>
+              </div>
+              <button className="close-btn" onClick={() => setShowHistory(false)}>×</button>
+            </div>
+            <div className="modal-content" style={{ overflowY: 'auto' }}>
+              {runHistory.length === 0 ? (
+                <p style={{ color: 'var(--text3)', textAlign: 'center', marginTop: '40px' }}>No runs recorded yet.</p>
+              ) : (
+                <table className="model-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)', fontSize: '12px' }}>
+                      <th style={{ padding: '10px' }}>Date</th>
+                      <th>Nodes</th>
+                      <th>Score</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runHistory.map((run: any) => (
+                      <tr key={run.id} style={{ fontSize: '11px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td style={{ padding: '10px', color: 'var(--text2)' }}>{run.date}</td>
+                        <td style={{ color: 'var(--text2)' }}>{run.nodesCount} nodes</td>
+                        <td style={{ color: 'var(--green)' }}>
+                          {run.scores && run.scores.length > 0 ? run.scores.map((s: number) => s.toFixed(4)).join(', ') : 'N/A'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {runHistory.length > 0 && (
+                <button className="ai-gen-btn" style={{ marginTop: '20px', width: '100%' }} onClick={clearHistory}>
+                  Clear History
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
+    </ErrorBoundary>
+  );
+};
+
+export default App;
+
+
+
+
