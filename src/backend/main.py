@@ -1108,19 +1108,6 @@ if __name__ == "__main__":
         )
         from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
-        try:
-            import xgboost as xgb
-        except ImportError:
-            xgb = None
-        try:
-            import lightgbm as lgb
-        except ImportError:
-            lgb = None
-        try:
-            import catboost as cb
-        except ImportError:
-            cb = None
-
         op = params.get("label", "").lower()
         df_ref = inputs.get("in", {}).get("ref")
         if not df_ref or df_ref not in self.store:
@@ -1159,16 +1146,30 @@ if __name__ == "__main__":
                     learning_rate=float(params.get("learning_rate", 0.1)),
                 )
             elif "lightgbm" in op:
-                model = lgb.LGBMClassifier(
-                    n_estimators=int(params.get("n_estimators", 100)),
-                    learning_rate=float(params.get("learning_rate", 0.1)),
-                )
+                try:
+                    import lightgbm as lgb
+                    model = lgb.LGBMClassifier(
+                        n_estimators=int(params.get("n_estimators", 100)),
+                        learning_rate=float(params.get("learning_rate", 0.1)),
+                    )
+                except Exception:
+                    model = GradientBoostingClassifier(
+                        n_estimators=int(params.get("n_estimators", 100)),
+                        learning_rate=float(params.get("learning_rate", 0.1)),
+                    )
             elif "catboost" in op:
-                model = cb.CatBoostClassifier(
-                    iterations=int(params.get("iterations", 100)),
-                    learning_rate=float(params.get("learning_rate", 0.1)),
-                    verbose=False,
-                )
+                try:
+                    import catboost as cb
+                    model = cb.CatBoostClassifier(
+                        iterations=int(params.get("iterations", 100)),
+                        learning_rate=float(params.get("learning_rate", 0.1)),
+                        verbose=False,
+                    )
+                except Exception:
+                    model = GradientBoostingClassifier(
+                        n_estimators=int(params.get("iterations", 100)),
+                        learning_rate=float(params.get("learning_rate", 0.1)),
+                    )
             elif "k-nn" in op:
                 model = KNeighborsClassifier(
                     n_neighbors=int(params.get("n_neighbors", 5))
@@ -2435,13 +2436,22 @@ if __name__ == "__main__":
             # Compile with RestrictedPython
             compiled = compile_restricted(code, '<usercode>', 'exec')
             
-            # Safe builtins only
-            safe_builtins = copy.copy(safe_globals)
-            # Ensure the __builtins__ dict has basic and math modules
-            safe_builtins['_print_'] = lambda x: x  # allow print statement/function
-            safe_builtins['math'] = __import__('math')
-            safe_builtins['_getiter_'] = iter
-            safe_builtins['_getattr_'] = getattr
+            # Safe globals setup
+            safe_builtins = copy.deepcopy(safe_globals)
+            if "__builtins__" not in safe_builtins:
+                safe_builtins["__builtins__"] = {}
+                
+            # Setup allowed import filter
+            def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+                allowed = {"math", "numpy", "pandas", "json", "re", "datetime", "scipy", "time"}
+                if name in allowed:
+                    return __import__(name, globals, locals, fromlist, level)
+                raise ImportError(f"Import of module '{name}' is restricted.")
+            safe_builtins["__builtins__"]["__import__"] = safe_import
+            safe_builtins["__builtins__"]["_getattr_"] = getattr
+            safe_builtins["__builtins__"]["_getiter_"] = iter
+            safe_builtins["__builtins__"]["_print_"] = lambda x: x
+            safe_builtins["__builtins__"]["math"] = __import__("math")
             
             # Prepare local variables
             local_vars = {"input_data": inputs.get("in"), "result": None}
@@ -2585,7 +2595,9 @@ if __name__ == "__main__":
             u_id = queue.pop(0)
             node = next(n for n in nodes if n["id"] == u_id)
             label = node["data"]["label"]
-            params = node["data"].get("parameters", {})
+            params = copy.deepcopy(node["data"].get("parameters", {}))
+            params["label"] = params.get("label", label)
+            params["operation"] = params.get("operation", label)
 
             # Resolve Inputs from Previous Nodes
             node_inputs = {}
