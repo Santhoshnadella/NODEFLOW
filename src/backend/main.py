@@ -14,14 +14,26 @@ from ultralytics import YOLO
 from transformers import pipeline
 from typing import List, Dict, Any, Callable
 from fastapi.middleware.cors import CORSMiddleware
+import secrets
+from RestrictedPython import compile_restricted, safe_globals
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+import copy
+import os
 
 app = FastAPI()
+
+# Get token from environment if provided, or generate a fallback
+WS_TOKEN = os.getenv("NODEFLOW_WS_TOKEN", secrets.token_hex(16))
+print(f"WS_TOKEN_FOR_AUTHENTICATION={WS_TOKEN}")
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost", "http://127.0.0.1", "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 class NodeFlowEngine:
@@ -47,7 +59,21 @@ class NodeFlowEngine:
         self.store[key] = obj
         self.store_history.append(key)
 
+    def _validate_file_path(self, path: str) -> bool:
+        """Reject paths outside user home, workspace, or with traversal attacks."""
+        if not path:
+            return False
+        abs_path = os.path.abspath(path)
+        home = os.path.abspath(os.path.expanduser("~"))
+        cwd = os.path.abspath(os.getcwd())
+        if ".." in path:
+            return False
+        if abs_path.startswith(home) or abs_path.startswith(cwd) or abs_path.startswith("k:\\plaid") or abs_path.startswith("K:\\plaid"):
+            return True
+        return False
+
     def setup_handlers(self):
+
         # 1. Math & Stats (Centralized)
         self.registry["Math Ops"] = self.handle_math
         self.registry["Vector Ops"] = self.handle_math
@@ -836,23 +862,28 @@ class NodeFlowEngine:
 
     def handle_load_csv(self, params, inputs):
         path = params.get("filePath", "data.csv")
+        if not self._validate_file_path(path):
+            return {"df": None, "error": "Access Denied: Path outside user home or workspace directory is restricted."}
         try:
             df = pd.read_csv(path)
             ref = f"df_{id(df)}"
             self.store[ref] = df
             return {"df": {"ref": ref, "cols": list(df.columns), "rows": len(df)}}
-        except Exception:
-            return {"df": None, "error": "File not found"}
+        except Exception as e:
+            return {"df": None, "error": f"Error loading CSV: {str(e)}"}
 
     def handle_load_data(self, params, inputs):
         path = params.get("filePath", "data.parquet")
+        if not self._validate_file_path(path):
+            return {"df": None, "error": "Access Denied: Path outside user home or workspace directory is restricted."}
         try:
             df = pd.read_parquet(path)
             ref = f"df_{id(df)}"
             self.store[ref] = df
             return {"df": {"ref": ref, "cols": list(df.columns), "rows": len(df)}}
-        except Exception:
-            return {"df": None, "error": "File not found"}
+        except Exception as e:
+            return {"df": None, "error": f"Error loading Parquet: {str(e)}"}
+
 
     def handle_stats(self, params, inputs):
         df_ref = inputs.get("df", {}).get("ref")
@@ -1136,12 +1167,41 @@ class NodeFlowEngine:
 
     def handle_custom_python(self, params, inputs):
         code = params.get("code", "def main(input):\n  return input")
-        local_vars = {"input_data": inputs.get("in"), "result": None}
         try:
-            exec(code + "\nresult = main(input_data)", {}, local_vars)
-            return {"out": local_vars["result"]}
+            # Compile with RestrictedPython
+            compiled = compile_restricted(code, '<usercode>', 'exec')
+            
+            # Safe builtins only
+            safe_builtins = copy.copy(safe_globals)
+            # Ensure the __builtins__ dict has basic and math modules
+            safe_builtins['_print_'] = lambda x: x  # allow print statement/function
+            safe_builtins['math'] = __import__('math')
+            safe_builtins['_getiter_'] = iter
+            safe_builtins['_getattr_'] = getattr
+            
+            # Prepare local variables
+            local_vars = {"input_data": inputs.get("in"), "result": None}
+            
+            def run_sandboxed():
+                # Execute user code to define functions
+                exec(compiled, safe_builtins, local_vars)
+                # Call main function
+                exec("result = main(input_data)", safe_builtins, local_vars)
+                return local_vars.get("result")
+            
+            # 10-second timeout using ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_sandboxed)
+                try:
+                    result = future.result(timeout=10)
+                    return {"out": result}
+                except TimeoutError:
+                    return {"out": None, "error": "Execution timed out (10s limit)"}
+                except Exception as e:
+                    return {"out": None, "error": str(e)}
         except Exception as e:
-            return {"out": None, "error": str(e)}
+            return {"out": None, "error": f"Compilation/Execution Error: {str(e)}"}
+
 
     def handle_metrics(self, params, inputs):
         from sklearn.metrics import accuracy_score, f1_score
@@ -1369,6 +1429,17 @@ engine = NodeFlowEngine()
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    # Token handshake
+    try:
+        auth_msg = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+        auth = json.loads(auth_msg)
+        if auth.get("token") != WS_TOKEN:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+    except Exception:
+        await websocket.close(code=4001, reason="Authentication failed")
+        return
+
     # Start background stats broadcaster
     stats_task = asyncio.create_task(engine.broadcast_stats(websocket))
     try:
@@ -1398,6 +1469,7 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
     finally:
         stats_task.cancel()
+
 
 
 if __name__ == "__main__":

@@ -18,7 +18,13 @@ if (started) {
   app.quit();
 }
 
+import crypto from 'node:crypto';
+
 let pythonProcess: ChildProcess | null = null;
+
+// Generate token once at startup for WebSocket authentication
+const WS_TOKEN = crypto.randomBytes(16).toString('hex');
+process.env.NODEFLOW_WS_TOKEN = WS_TOKEN;
 
 const startPythonBackend = () => {
   const scriptPath = path.join(app.getAppPath(), 'src', 'backend', 'main.py');
@@ -26,7 +32,11 @@ const startPythonBackend = () => {
   // Use 'python' or 'python3' depending on the system
   const pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
   
-  const env = { ...process.env, PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: 'python' };
+  const env = { 
+    ...process.env, 
+    PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: 'python',
+    NODEFLOW_WS_TOKEN: WS_TOKEN
+  };
   pythonProcess = spawn(pythonExecutable, [scriptPath], { env });
 
   pythonProcess.stdout?.on('data', (data) => {
@@ -41,6 +51,7 @@ const startPythonBackend = () => {
     console.log(`Backend process exited with code ${code}`);
   });
 };
+
 
 const createWindow = () => {
 

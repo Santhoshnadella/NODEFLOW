@@ -21,6 +21,9 @@ export const useBackend = () => {
 
     socket.onopen = () => {
       console.log('Connected to Backend');
+      // Send handshake token from preload API
+      const token = (window as any).nodeflowAPI?.wsToken || '';
+      socket.send(JSON.stringify({ token }));
       setIsConnected(true);
     };
 
@@ -41,6 +44,22 @@ export const useBackend = () => {
           ...prev,
           [message.node_id]: [...(prev[message.node_id] || []), { role: 'assistant', content: message.content }]
         }));
+      } else if (message.type === 'chat_token') {
+        setChatHistories(prev => {
+          const hist = prev[message.node_id] || [];
+          const last = hist[hist.length - 1];
+          if (last && last.role === 'assistant') {
+            return {
+              ...prev,
+              [message.node_id]: [...hist.slice(0, -1), { role: 'assistant', content: last.content + message.token }]
+            };
+          } else {
+            return {
+              ...prev,
+              [message.node_id]: [...hist, { role: 'assistant', content: message.token }]
+            };
+          }
+        });
       } else if (message.type === 'training_progress') {
         setStats((prev: any) => ({
           ...prev,
@@ -74,10 +93,13 @@ export const useBackend = () => {
       }
     };
 
-    socket.onclose = () => {
-      console.log('Disconnected from Backend');
+    socket.onclose = (event) => {
+      console.log('Disconnected from Backend', event.reason);
       setIsConnected(false);
       setIsRunning(false);
+      if (event.code === 4001) {
+        console.error('WebSocket Authentication Failed!');
+      }
     };
 
     socketRef.current = socket;
