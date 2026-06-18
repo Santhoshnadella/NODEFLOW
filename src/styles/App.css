@@ -527,3 +527,39 @@ body {
 .react-flow__controls-button svg {
   fill: currentColor !important;
 }
+
+/* --- PORT COMPATIBILITY HIGHLIGHTING --- */
+/* When actively dragging a connection, highlight valid targets in green */
+.react-flow__handle-connecting.react-flow__handle-valid {
+  background-color: #10b981 !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.35), 0 0 14px #10b981 !important;
+  transform: scale(1.35);
+  transition: all 0.15s ease;
+}
+
+/* Dim invalid target handles */
+.react-flow__handle-connecting:not(.react-flow__handle-valid) {
+  opacity: 0.15 !important;
+  background-color: #ef4444 !important;
+  transform: scale(0.9);
+  transition: all 0.15s ease;
+}
+
+/* Port type colour classes */
+.port.tensor  { background: var(--amber) !important; border-color: var(--amber) !important; }
+.port.dataframe { background: var(--blue) !important; border-color: var(--blue) !important; }
+.port.model   { background: #a78bfa !important; border-color: #a78bfa !important; }
+.port.text    { background: var(--green) !important; border-color: var(--green) !important; }
+.port.image   { background: var(--teal) !important; border-color: var(--teal) !important; }
+.port.number  { background: var(--pink) !important; border-color: var(--pink) !important; }
+.port.any     { background: var(--accent) !important; border-color: var(--accent) !important; }
+
+/* Base handle style overrides */
+.react-flow__handle {
+  width: 9px !important;
+  height: 9px !important;
+  border-radius: 50% !important;
+  border: 2px solid var(--bg3) !important;
+  transition: box-shadow 0.15s, transform 0.15s, opacity 0.15s;
+}
+

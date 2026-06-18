@@ -1,6 +1,7 @@
 import React from 'react';
 import { Node } from '@xyflow/react';
 import { GraduationCap } from 'lucide-react';
+import CodeEditor from './CodeEditor';
 
 interface InspectorProps {
   selectedNode: Node<any> | null;
@@ -21,6 +22,9 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onParameterChange, 
 
   const { data, id } = selectedNode;
 
+  // Check if this is a Custom Python node
+  const isCustomPython = data.label === 'Custom Python';
+
   return (
     <aside className="inspector">
       <div className="fade-in">
@@ -34,31 +38,41 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onParameterChange, 
               <label style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text3)', display: 'block', marginBottom: '4px' }}>
                 {key}
               </label>
-              <div style={{ display: 'flex', gap: '4px' }}>
-                <input 
-                  type="text" 
-                  value={String(value)} 
-                  className="search-input" 
-                  style={{ flex: 1, background: 'var(--bg4)', border: '1px solid var(--border)', borderRadius: '4px', padding: '6px', fontSize: '11px', color: 'white' }} 
-                  onChange={(e) => onParameterChange(id, key, e.target.value)}
+              {/* Use the CodeEditor for the 'code' parameter on Custom Python nodes */}
+              {isCustomPython && key === 'code' ? (
+                <CodeEditor
+                  value={String(value)}
+                  onChange={(val) => onParameterChange(id, key, val)}
+                  language="python"
+                  placeholder={'def main(input_data):\n    # Your code here\n    return input_data'}
                 />
-                {key.toLowerCase().includes('path') && (
-                  <button 
-                    onClick={() => {
-                      const input = document.createElement('input');
-                      input.type = 'file';
-                      input.onchange = (e: any) => {
-                        const file = e.target.files[0];
-                        if (file) onParameterChange(id, key, file.path || file.name);
-                      };
-                      input.click();
-                    }}
-                    style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '4px', color: 'white', padding: '0 8px', cursor: 'pointer', fontSize: '10px' }}
-                  >
-                    📂
-                  </button>
-                )}
-              </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <input 
+                    type="text" 
+                    value={String(value)} 
+                    className="search-input" 
+                    style={{ flex: 1, background: 'var(--bg4)', border: '1px solid var(--border)', borderRadius: '4px', padding: '6px', fontSize: '11px', color: 'white' }} 
+                    onChange={(e) => onParameterChange(id, key, e.target.value)}
+                  />
+                  {key.toLowerCase().includes('path') && (
+                    <button 
+                      onClick={() => {
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.onchange = (e: any) => {
+                          const file = e.target.files[0];
+                          if (file) onParameterChange(id, key, file.path || file.name);
+                        };
+                        input.click();
+                      }}
+                      style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '4px', color: 'white', padding: '0 8px', cursor: 'pointer', fontSize: '10px' }}
+                    >
+                      📂
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
           {!data.parameters && (

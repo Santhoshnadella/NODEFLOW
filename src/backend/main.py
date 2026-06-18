@@ -883,6 +883,52 @@ async def websocket_endpoint(websocket: WebSocket):
                 engine.cancel_event.set()
                 if engine.current_task:
                     engine.current_task.cancel()
+            elif msg["type"] == "scan_models":
+                models_dir = os.path.abspath("./models")
+                found = []
+                MODEL_META = {
+                    "phi-3-mini.gguf":    {"type": "GGUF LLM",   "size": "2.2 GB"},
+                    "llama-3-8b.gguf":    {"type": "GGUF LLM",   "size": "4.9 GB"},
+                    "yolov8n.pt":         {"type": "Ultralytics", "size": "6.2 MB"},
+                    "whisper-tiny.pt":    {"type": "Whisper STT", "size": "72 MB"},
+                    "sd-v1-5.safetensors":{"type": "Diffusion",   "size": "4.0 GB"},
+                }
+                if os.path.exists(models_dir):
+                    for fname in os.listdir(models_dir):
+                        meta = MODEL_META.get(fname, {"type": "Unknown", "size": "?"})
+                        found.append({"name": fname, "type": meta["type"], "size": meta["size"], "status": "ready"})
+                # Add placeholder entries for undownloaded known models
+                found_names = {f["name"] for f in found}
+                for name, meta in MODEL_META.items():
+                    if name not in found_names:
+                        found.append({"name": name, "type": meta["type"], "size": meta["size"], "status": "not_downloaded"})
+                await websocket.send_text(json.dumps({"type": "scan_results", "models": found}))
+
+            elif msg["type"] == "download_model":
+                model_name = msg.get("model", "phi-3-mini.gguf")
+                # Simulate a download with realistic chunked progress
+                async def simulate_download(name: str):
+                    steps = [5, 12, 20, 30, 38, 47, 55, 63, 72, 80, 88, 95, 100]
+                    for pct in steps:
+                        await asyncio.sleep(0.6)
+                        try:
+                            await websocket.send_text(json.dumps({
+                                "type": "download_progress",
+                                "model": name,
+                                "progress": pct
+                            }))
+                        except Exception:
+                            break
+                    # Mark as ready
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "type": "download_complete",
+                            "model": name
+                        }))
+                    except Exception:
+                        pass
+                asyncio.create_task(simulate_download(model_name))
+
     except Exception:
         pass
     finally:

@@ -13,6 +13,8 @@ export const useBackend = () => {
     try { return JSON.parse(localStorage.getItem('nodeflow_history') || '[]'); } catch { return []; }
   });
   const [profilerStats, setProfilerStats] = useState<any>(null);
+  const [modelScanResults, setModelScanResults] = useState<any[]>([]);
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<Record<string, number>>({});
   const currentRunNodes = useRef<any[]>([]);
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -90,6 +92,13 @@ export const useBackend = () => {
         setStats(message.data);
       } else if (message.type === 'pipeline_generated') {
         setGeneratedPipelineId(message.templateId);
+      } else if (message.type === 'scan_results') {
+        setModelScanResults(message.models || []);
+      } else if (message.type === 'download_progress') {
+        setModelDownloadProgress(prev => ({ ...prev, [message.model]: message.progress }));
+      } else if (message.type === 'download_complete') {
+        setModelDownloadProgress(prev => ({ ...prev, [message.model]: 100 }));
+        setModelScanResults(prev => prev.map(m => m.name === message.model ? { ...m, status: 'ready' } : m));
       }
     };
 
@@ -197,7 +206,7 @@ export const useBackend = () => {
     localStorage.removeItem('nodeflow_history');
   }, []);
 
-  return { isConnected, isRunning, progress, stats, nodeStatuses, nodeResults, chatHistories, generatedPipelineId, runHistory, profilerStats, clearHistory, runPipeline, stopPipeline, sendMessage, sendChatMessage };
+  return { isConnected, isRunning, progress, stats, nodeStatuses, nodeResults, chatHistories, generatedPipelineId, runHistory, profilerStats, clearHistory, runPipeline, stopPipeline, sendMessage, sendChatMessage, modelScanResults, modelDownloadProgress };
 };
 
 

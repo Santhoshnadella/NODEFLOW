@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
 
 const BaseNode = ({ id, data, selected }: { id: string, data: any, selected: boolean }) => {
@@ -64,9 +64,21 @@ const BaseNode = ({ id, data, selected }: { id: string, data: any, selected: boo
     return colors[data.category] || '#6c63ff';
   };
 
+  const [validationHovered, setValidationHovered] = useState(false);
+
   const status = data.status || 'idle';
   const result = data.result;
   const color = getCategoryColor();
+
+  // Extract validation metadata from result
+  const validation = result?.validation;
+  const hasWarning = validation && (
+    Object.values(validation.missing_values || {}).some((v: any) => v > 0) ||
+    (validation.rows === 0)
+  );
+  const totalMissing = validation
+    ? Object.values(validation.missing_values || {}).reduce((a: number, b: any) => a + (b as number), 0)
+    : 0;
 
   const renderEditableParam = (key: string, value: any) => {
     // Determine input type
@@ -202,6 +214,82 @@ const BaseNode = ({ id, data, selected }: { id: string, data: any, selected: boo
       borderRadius: data.kidMode ? '24px' : 'var(--r)',
       padding: data.kidMode ? '4px' : '0'
     }}>
+      {validation && (
+        <div
+          style={{ position: 'relative' }}
+          onMouseEnter={() => setValidationHovered(true)}
+          onMouseLeave={() => setValidationHovered(false)}
+        >
+          {/* Validation badge strip */}
+          <div style={{
+            margin: '4px 8px 0',
+            padding: '3px 8px',
+            borderRadius: '5px',
+            background: hasWarning ? 'rgba(245,158,11,0.15)' : 'rgba(74,222,128,0.1)',
+            border: `1px solid ${hasWarning ? 'rgba(245,158,11,0.4)' : 'rgba(74,222,128,0.3)'}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            cursor: 'default',
+            fontSize: '9px',
+            fontFamily: 'var(--font-mono)',
+          }}>
+            <span style={{ fontSize: '11px' }}>{hasWarning ? '⚠️' : '✅'}</span>
+            <span style={{ color: hasWarning ? 'var(--amber)' : 'var(--green)' }}>
+              {validation.rows} rows · {validation.cols?.length || 0} cols
+              {hasWarning && totalMissing > 0 ? ` · ${totalMissing} NaN` : ''}
+            </span>
+          </div>
+
+          {/* Stats hover tooltip */}
+          {validationHovered && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: '8px',
+              zIndex: 9999,
+              background: 'var(--bg4)',
+              border: '1px solid var(--border2)',
+              borderRadius: '8px',
+              padding: '10px 12px',
+              minWidth: '200px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+              fontSize: '10px',
+              fontFamily: 'var(--font-mono)',
+              pointerEvents: 'none',
+            }}>
+              <div style={{ color: 'var(--accent2)', fontWeight: 700, marginBottom: '8px', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '1px' }}>Dataset Stats</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
+                <div style={{ color: 'var(--text3)' }}>Rows</div>
+                <div style={{ color: 'var(--text)' }}>{validation.rows}</div>
+                <div style={{ color: 'var(--text3)' }}>Columns</div>
+                <div style={{ color: 'var(--text)' }}>{validation.cols?.length || 0}</div>
+                <div style={{ color: 'var(--text3)' }}>Numeric</div>
+                <div style={{ color: 'var(--blue)' }}>{validation.numeric_columns?.length || 0}</div>
+                <div style={{ color: 'var(--text3)' }}>Categorical</div>
+                <div style={{ color: 'var(--pink)' }}>{validation.categorical_columns?.length || 0}</div>
+                {totalMissing > 0 && (
+                  <>
+                    <div style={{ color: 'var(--text3)' }}>Missing</div>
+                    <div style={{ color: 'var(--amber)' }}>{totalMissing} NaN</div>
+                  </>
+                )}
+              </div>
+              {hasWarning && totalMissing > 0 && (
+                <div style={{ marginTop: '8px', padding: '5px 6px', background: 'var(--amber-dim)', borderRadius: '4px', color: 'var(--amber)', fontSize: '9px' }}>
+                  ⚠️ Missing values detected — consider imputation
+                </div>
+              )}
+              {validation.rows === 0 && (
+                <div style={{ marginTop: '8px', padding: '5px 6px', background: 'var(--coral-dim)', borderRadius: '4px', color: 'var(--coral)', fontSize: '9px' }}>
+                  🚫 Empty dataset — check file path
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="node-header" style={{ borderLeft: `3px solid ${color}` }}>
         <div className="node-icon" style={{ 
           width: '22px', height: '22px', borderRadius: '5px', 

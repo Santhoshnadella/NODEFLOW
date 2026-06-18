@@ -62,7 +62,8 @@ const App = () => {
   
   const { 
     runPipeline, stopPipeline, isRunning, progress, stats, 
-    nodeStatuses, nodeResults, chatHistories, generatedPipelineId, runHistory, clearHistory, isConnected, sendMessage, sendChatMessage, profilerStats 
+    nodeStatuses, nodeResults, chatHistories, generatedPipelineId, runHistory, clearHistory, isConnected, sendMessage, sendChatMessage, profilerStats,
+    modelScanResults, modelDownloadProgress
   } = useBackend();
 
   const loadPipeline = useCallback((templateId: string) => {
@@ -120,22 +121,23 @@ const App = () => {
 
   const onConnect = useCallback(
     (params: Connection) => {
-      const sourceNode = nodes.find(n => n.id === params.source);
-      const targetNode = nodes.find(n => n.id === params.target);
-      
-      if (sourceNode && targetNode) {
-        const sourcePort = sourceNode.data.outputs?.find((o: any) => o.id === params.sourceHandle);
-        const targetPort = targetNode.data.inputs?.find((i: any) => i.id === params.targetHandle);
-        
-        if (sourcePort && targetPort && sourcePort.type !== targetPort.type && sourcePort.type !== 'any' && targetPort.type !== 'any') {
-          console.warn(`Type mismatch: ${sourcePort.type} -> ${targetPort.type}`);
-          // Optional: block connection
-          // return;
-        }
-      }
       setEdges((eds) => addEdge(params, eds));
     },
-    [nodes, setEdges]
+    [setEdges]
+  );
+
+  const isValidConnection = useCallback(
+    (connection: any) => {
+      const sourceNode = nodes.find(n => n.id === connection.source);
+      const targetNode = nodes.find(n => n.id === connection.target);
+      const sourcePort = sourceNode?.data.outputs?.find((o: any) => o.id === connection.sourceHandle);
+      const targetPort = targetNode?.data.inputs?.find((i: any) => i.id === connection.targetHandle);
+      // Allow connection if ports are missing definitions or either side is 'any'
+      if (!sourcePort || !targetPort) return true;
+      if (sourcePort.type === 'any' || targetPort.type === 'any') return true;
+      return sourcePort.type === targetPort.type;
+    },
+    [nodes]
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -633,6 +635,7 @@ print("Ran Node: ${label}")
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            isValidConnection={isValidConnection}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onNodeMouseEnter={onNodeMouseEnter}
@@ -792,40 +795,106 @@ print("Ran Node: ${label}")
 
       {showModelManager && (
         <div className="modal-overlay" onClick={() => setShowModelManager(false)}>
-          <div className="deep-dive-modal" style={{ height: '500px' }} onClick={e => e.stopPropagation()}>
+          <div className="deep-dive-modal" style={{ width: '680px', height: '520px' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <Database size={18} color="var(--accent2)" />
                 <h2 style={{ fontSize: '16px', margin: 0 }}>Model Manager</h2>
+                <span style={{ fontSize: '10px', color: 'var(--text3)', background: 'var(--bg4)', padding: '2px 8px', borderRadius: '10px' }}>
+                  {modelScanResults.filter(m => m.status === 'ready').length} / {modelScanResults.length} ready
+                </span>
               </div>
-              <button className="close-btn" onClick={() => setShowModelManager(false)}>×</button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button className="tb-btn" onClick={() => sendMessage({ type: 'scan_models' })} style={{ fontSize: '11px' }}>
+                  🔍 Scan Local
+                </button>
+                <button className="close-btn" onClick={() => setShowModelManager(false)}>×</button>
+              </div>
             </div>
-            <div className="modal-content">
-              <table className="model-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)', fontSize: '12px' }}>
-                    <th style={{ padding: '10px' }}>Name</th>
-                    <th>Type</th>
-                    <th>Size</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr style={{ fontSize: '11px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <td style={{ padding: '10px' }}>yolov8n.pt</td>
-                    <td>Ultralytics</td>
-                    <td>6.2 MB</td>
-                    <td style={{ color: 'var(--green)' }}>Ready</td>
-                  </tr>
-                  <tr style={{ fontSize: '11px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <td style={{ padding: '10px' }}>llama-3-8b.gguf</td>
-                    <td>GGUF</td>
-                    <td>4.9 GB</td>
-                    <td style={{ color: 'var(--accent2)' }}>Downloading (45%)</td>
-                  </tr>
-                </tbody>
-              </table>
-              <button className="ai-gen-btn" style={{ marginTop: '20px', width: '100%' }}>Scan Local ~/nodeflow/models/</button>
+            <div className="modal-content" style={{ padding: '16px' }}>
+              {modelScanResults.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text3)' }}>
+                  <div style={{ fontSize: '32px', marginBottom: '12px' }}>🗄️</div>
+                  <div style={{ fontSize: '13px', marginBottom: '8px' }}>No models scanned yet</div>
+                  <div style={{ fontSize: '11px', marginBottom: '20px' }}>Click "Scan Local" to detect models in <code style={{ background: 'var(--bg4)', padding: '1px 5px', borderRadius: '3px' }}>./models/</code></div>
+                  <button className="ai-gen-btn" onClick={() => sendMessage({ type: 'scan_models' })}>
+                    🔍 Scan Now
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {modelScanResults.map((model: any) => {
+                    const dlPct = modelDownloadProgress[model.name];
+                    const isDownloading = dlPct !== undefined && dlPct < 100;
+                    const isReady = model.status === 'ready' || dlPct === 100;
+                    return (
+                      <div key={model.name} style={{
+                        background: 'var(--bg3)',
+                        border: `1px solid ${isReady ? 'rgba(74,222,128,0.3)' : isDownloading ? 'rgba(108,99,255,0.4)' : 'var(--border)'}`,
+                        borderRadius: '10px',
+                        padding: '12px 14px',
+                        transition: 'border-color 0.2s',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isDownloading ? '8px' : '0' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '36px', height: '36px', borderRadius: '8px',
+                              background: isReady ? 'rgba(74,222,128,0.12)' : 'var(--bg4)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px'
+                            }}>
+                              {model.type?.includes('LLM') || model.type?.includes('GGUF') ? '🧠' :
+                               model.type?.includes('Ultralytics') ? '👁️' :
+                               model.type?.includes('Diffusion') ? '🎨' :
+                               model.type?.includes('Whisper') ? '🎤' : '📦'}
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--font-mono)' }}>{model.name}</div>
+                              <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '2px' }}>{model.type} · {model.size}</div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {isReady && (
+                              <span style={{ fontSize: '10px', color: 'var(--green)', background: 'rgba(74,222,128,0.1)', padding: '3px 8px', borderRadius: '10px', border: '1px solid rgba(74,222,128,0.3)' }}>
+                                ✓ Ready
+                              </span>
+                            )}
+                            {isDownloading && (
+                              <span style={{ fontSize: '10px', color: 'var(--accent2)', fontFamily: 'var(--font-mono)' }}>
+                                {dlPct}%
+                              </span>
+                            )}
+                            {!isReady && !isDownloading && (
+                              <button
+                                onClick={() => sendMessage({ type: 'download_model', model: model.name })}
+                                style={{
+                                  background: 'var(--accent)', color: 'white', border: 'none',
+                                  borderRadius: '6px', padding: '5px 12px', fontSize: '10px', cursor: 'pointer',
+                                  fontWeight: 600, transition: 'opacity 0.2s'
+                                }}
+                              >
+                                ↓ Download
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {/* Download progress bar */}
+                        {isDownloading && (
+                          <div style={{ height: '4px', background: 'var(--bg4)', borderRadius: '2px', overflow: 'hidden' }}>
+                            <div style={{
+                              height: '100%',
+                              width: `${dlPct}%`,
+                              background: 'linear-gradient(90deg, var(--accent), var(--accent2))',
+                              borderRadius: '2px',
+                              transition: 'width 0.4s ease',
+                              boxShadow: '0 0 8px var(--accent-glow)',
+                            }} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>
