@@ -1,7 +1,29 @@
 import React from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { Handle, Position, useReactFlow } from '@xyflow/react';
 
-const BaseNode = ({ data, selected }: { data: any, selected: boolean }) => {
+const BaseNode = ({ id, data, selected }: { id: string, data: any, selected: boolean }) => {
+  const { setNodes } = useReactFlow();
+
+  const handleParameterChange = (key: string, val: any) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === id) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              parameters: {
+                ...(node.data.parameters || {}),
+                [key]: val,
+              },
+            },
+          };
+        }
+        return node;
+      })
+    );
+  };
+
   const getKidFriendlyName = () => {
     if (!data.kidMode) return data.label;
     const mapping: Record<string, string> = {
@@ -45,6 +67,129 @@ const BaseNode = ({ data, selected }: { data: any, selected: boolean }) => {
   const status = data.status || 'idle';
   const result = data.result;
   const color = getCategoryColor();
+
+  const renderEditableParam = (key: string, value: any) => {
+    // Determine input type
+    const isBool = typeof value === 'boolean';
+    const keyLower = key.toLowerCase();
+
+    // Select lists
+    let opts: string[] | null = null;
+    if (key === 'lr') opts = ['1e-4', '1e-3', '3e-3', '1e-2'];
+    else if (key === 'optimizer') opts = ['SGD', 'Adam', 'AdamW', 'Lion'];
+    else if (key === 'scheduler') opts = ['None', 'StepLR', 'CosineAnnealing', 'OneCycle'];
+    else if (key === 'operation') {
+      if (data.category === 'math') opts = ['add', 'subtract', 'multiply', 'divide', 'power', 'log', 'exp', 'sqrt', 'abs', 'clamp', 'dot_product', 'cross_product', 'magnitude', 'cosine_similarity', 'multiply_matrix', 'transpose', 'inverse', 'determinant', 'eigenvalues', 'mean', 'median', 'mode', 'std_dev', 'variance', 'skewness', 'kurtosis', 'covariance', 'histogram'];
+      else opts = ['dot_product', 'normalize', 'magnitude'];
+    } else if (key === 'variant') opts = ['resnet18', 'resnet34', 'resnet50', 'resnet101'];
+    else if (key === 'metrics') opts = ['accuracy', 'f1', 'acc+f1', 'full_report'];
+
+    if (isBool) {
+      return (
+        <label className="param-toggle" style={{ position: 'relative', width: '28px', height: '15px', display: 'block' }} onClick={e => e.stopPropagation()}>
+          <input 
+            type="checkbox" 
+            checked={!!value} 
+            style={{ opacity: 0, width: 0, height: 0 }}
+            onChange={(e) => handleParameterChange(key, e.target.checked)} 
+          />
+          <div className="param-toggle-track" style={{
+            position: 'absolute', inset: 0, background: value ? 'var(--accent)' : 'var(--bg4)', 
+            borderRadius: '8px', cursor: 'pointer', transition: 'background 0.2s'
+          }}>
+            <div style={{
+              position: 'absolute', left: '2px', top: '2px', width: '11px', height: '11px',
+              borderRadius: '50%', background: 'white', transition: 'transform 0.2s',
+              transform: value ? 'translateX(13px)' : 'none'
+            }} />
+          </div>
+        </label>
+      );
+    }
+
+    if (opts) {
+      return (
+        <select 
+          className="param-select" 
+          value={String(value)}
+          style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', background: 'var(--bg4)', border: '1px solid var(--border)', color: 'var(--text2)', padding: '2px 4px', borderRadius: '3px', outline: 'none' }}
+          onClick={e => e.stopPropagation()}
+          onChange={(e) => handleParameterChange(key, e.target.value)}
+        >
+          {opts.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      );
+    }
+
+    if (typeof value === 'number') {
+      let min = 0;
+      let max = 100;
+      let step = 1;
+      if (key === 'epochs') { min = 1; max = 100; }
+      else if (key === 'batch_size') { min = 1; max = 128; }
+      else if (key === 'train_ratio') { min = 0.5; max = 0.95; step = 0.05; }
+      else if (key === 'n_samples') { min = 10; max = 2000; step = 10; }
+      else if (key === 'noise') { min = 0; max = 1; step = 0.05; }
+      else if (key === 'epsilon') { min = 1e-6; max = 1e-3; step = 1e-6; }
+
+      const useSlider = key === 'epochs' || key === 'batch_size' || key === 'train_ratio' || key === 'n_samples' || key === 'noise';
+
+      if (useSlider) {
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={e => e.stopPropagation()}>
+            <input 
+              type="range" 
+              min={min} 
+              max={max} 
+              step={step} 
+              value={value} 
+              style={{ width: '60px', height: '3px', accentColor: 'var(--accent)', cursor: 'pointer' }}
+              onChange={(e) => handleParameterChange(key, Number(e.target.value))}
+            />
+            <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{value}</span>
+          </div>
+        );
+      }
+
+      return (
+        <input 
+          type="number" 
+          value={value} 
+          style={{ width: '50px', background: 'var(--bg4)', border: '1px solid var(--border)', color: 'white', fontSize: '9px', padding: '2px 4px', borderRadius: '3px' }}
+          onClick={e => e.stopPropagation()}
+          onChange={(e) => handleParameterChange(key, Number(e.target.value))}
+        />
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+        <input 
+          type="text" 
+          value={String(value)} 
+          style={{ width: '70px', background: 'var(--bg4)', border: '1px solid var(--border)', color: 'white', fontSize: '9px', padding: '2px 4px', borderRadius: '3px' }}
+          onChange={(e) => handleParameterChange(key, e.target.value)}
+        />
+        {keyLower.includes('path') && (
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.onchange = (evt: any) => {
+                const file = evt.target.files[0];
+                if (file) handleParameterChange(key, file.path || file.name);
+              };
+              input.click();
+            }}
+            style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '3px', color: 'white', padding: '2px 4px', cursor: 'pointer', fontSize: '8px' }}
+          >
+            📂
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className={`base-node ${selected ? 'selected' : ''} ${status} ${data.kidMode ? 'kid-mode' : ''}`} style={{ 
@@ -170,10 +315,8 @@ const BaseNode = ({ data, selected }: { data: any, selected: boolean }) => {
         <div style={{ padding: '8px 12px 10px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '5px' }}>
           {Object.entries(data.parameters).slice(0, data.selectedMode === 'dev' ? undefined : 2).map(([key, value]) => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text3)' }}>{key}</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text2)', maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {String(value)}
-              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text3)' }}>{key}</span>
+              {renderEditableParam(key, value)}
             </div>
           ))}
         </div>

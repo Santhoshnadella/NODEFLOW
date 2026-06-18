@@ -2634,6 +2634,20 @@ export const NODE_TEMPLATES = [
       }
     } 
   },
+  { 
+    type: 'lossCurveNode', label: 'Loss Curve Chart', category: 'explain', 
+    data: { 
+      label: 'Loss Curve Chart', category: 'explain', 
+      inputs: [{id:'in', label:'Trainer', type:'any'}], 
+      outputs: [],
+      explanation: {
+        what: "Visualizes the training loss over epochs.",
+        how: "Renders a live line chart during model training.",
+        gives: "A live loss chart plotted directly on the canvas.",
+        analogy: "Like watching a runner's lap times get faster as they practice!"
+      }
+    } 
+  },
 
   // --- 13. MLOPS & PRODUCTION ---
   { 

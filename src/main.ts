@@ -27,10 +27,25 @@ const WS_TOKEN = crypto.randomBytes(16).toString('hex');
 process.env.NODEFLOW_WS_TOKEN = WS_TOKEN;
 
 const startPythonBackend = () => {
-  const scriptPath = path.join(app.getAppPath(), 'src', 'backend', 'main.py');
-  
-  // Use 'python' or 'python3' depending on the system
-  const pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
+  let scriptPath: string;
+  let pythonExecutable: string;
+
+  if (app.isPackaged) {
+    scriptPath = path.join(process.resourcesPath, 'backend', 'main.py');
+    const localPython = process.platform === 'win32'
+      ? path.join(process.resourcesPath, 'python_env', 'python.exe')
+      : path.join(process.resourcesPath, 'python_env', 'bin', 'python3');
+      
+    const fs = require('node:fs');
+    if (fs.existsSync(localPython)) {
+      pythonExecutable = localPython;
+    } else {
+      pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
+    }
+  } else {
+    scriptPath = path.join(app.getAppPath(), 'src', 'backend', 'main.py');
+    pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
+  }
   
   const env = { 
     ...process.env, 

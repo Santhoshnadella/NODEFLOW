@@ -12,6 +12,7 @@
     "noImplicitAny": true,
     "sourceMap": true,
     "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
         "resolveJsonModule": true,
     "strict": true,
     "types": ["node", "vite/client"]

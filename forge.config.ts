@@ -12,7 +12,8 @@ const config: ForgeConfig = {
     asar: true,
     executableName: 'nodeflow',
     extraResource: [
-      './src/backend'
+      './src/backend',
+      './python_env'
     ],
   },
 
