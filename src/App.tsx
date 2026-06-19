@@ -287,7 +287,7 @@ const App = () => {
       try {
         const parsed = JSON.parse(e.target?.result as string);
         let loadedNodes = parsed.nodes || [];
-        let loadedEdges = parsed.edges || [];
+        const loadedEdges = parsed.edges || [];
         const version = parsed.version || '1.0.0';
         
         const modeToLoad = parsed.selectedMode || 'dev';

@@ -36,6 +36,7 @@ const startPythonBackend = () => {
       ? path.join(process.resourcesPath, 'python_env', 'python.exe')
       : path.join(process.resourcesPath, 'python_env', 'bin', 'python3');
       
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('node:fs');
     if (fs.existsSync(localPython)) {
       pythonExecutable = localPython;
