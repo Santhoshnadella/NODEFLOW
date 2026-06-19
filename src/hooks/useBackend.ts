@@ -4,7 +4,17 @@ export const useBackend = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [stats, setStats] = useState<any>({ vram_used: 0, vram_total: 8 });
+  const [stats, setStats] = useState<any>({ vram_used: 0, vram_total: 0 });
+  const [systemInfo, setSystemInfo] = useState<any>({
+    gpu_available: false,
+    gpu_name: null,
+    gpu_vram_gb: 0,
+    cuda_version: null,
+    mps_available: false,
+    python_version: null,
+    platform: null,
+    current_device: 'cpu',
+  });
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, 'idle' | 'running' | 'complete' | 'error'>>({});
   const [nodeResults, setNodeResults] = useState<Record<string, any>>({});
   const [chatHistories, setChatHistories] = useState<Record<string, any[]>>({});
@@ -27,6 +37,12 @@ export const useBackend = () => {
       const token = (window as any).nodeflowAPI?.wsToken || '';
       socket.send(JSON.stringify({ token }));
       setIsConnected(true);
+      // Request full system info immediately after auth handshake
+      setTimeout(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'get_system_info' }));
+        }
+      }, 200);
     };
 
     socket.onmessage = (event) => {
@@ -90,6 +106,21 @@ export const useBackend = () => {
         });
       } else if (message.type === 'stats') {
         setStats(message.data);
+        // Merge rich hardware info from stats broadcast into systemInfo
+        setSystemInfo((prev: any) => ({
+          ...prev,
+          gpu_available: message.data.gpu_available ?? prev.gpu_available,
+          gpu_name: message.data.gpu_name ?? prev.gpu_name,
+          cuda_version: message.data.cuda_version ?? prev.cuda_version,
+          mps_available: message.data.mps_available ?? prev.mps_available,
+          python_version: message.data.python_version ?? prev.python_version,
+          current_device: message.data.device?.toLowerCase() ?? prev.current_device,
+        }));
+      } else if (message.type === 'system_info') {
+        setSystemInfo(message.data);
+      } else if (message.type === 'device_switched') {
+        setSystemInfo((prev: any) => ({ ...prev, current_device: message.device }));
+        setStats((prev: any) => ({ ...prev, device: message.device.toUpperCase() }));
       } else if (message.type === 'pipeline_generated') {
         setGeneratedPipelineId(message.templateId);
       } else if (message.type === 'scan_results') {
@@ -201,12 +232,18 @@ export const useBackend = () => {
     }
   }, [isConnected]);
 
+  const switchDevice = useCallback((device: 'cuda' | 'mps' | 'cpu') => {
+    if (socketRef.current && isConnected) {
+      socketRef.current.send(JSON.stringify({ type: 'switch_device', device }));
+    }
+  }, [isConnected]);
+
   const clearHistory = useCallback(() => {
     setRunHistory([]);
     localStorage.removeItem('nodeflow_history');
   }, []);
 
-  return { isConnected, isRunning, progress, stats, nodeStatuses, nodeResults, chatHistories, generatedPipelineId, runHistory, profilerStats, clearHistory, runPipeline, stopPipeline, sendMessage, sendChatMessage, modelScanResults, modelDownloadProgress };
+  return { isConnected, isRunning, progress, stats, systemInfo, switchDevice, nodeStatuses, nodeResults, chatHistories, generatedPipelineId, runHistory, profilerStats, clearHistory, runPipeline, stopPipeline, sendMessage, sendChatMessage, modelScanResults, modelDownloadProgress };
 };
 
 

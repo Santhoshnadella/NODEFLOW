@@ -61,7 +61,7 @@ const App = () => {
   });
   
   const { 
-    runPipeline, stopPipeline, isRunning, progress, stats, 
+    runPipeline, stopPipeline, isRunning, progress, stats, systemInfo, switchDevice,
     nodeStatuses, nodeResults, chatHistories, generatedPipelineId, runHistory, clearHistory, isConnected, sendMessage, sendChatMessage, profilerStats,
     modelScanResults, modelDownloadProgress
   } = useBackend();
@@ -713,7 +713,9 @@ print("Ran Node: ${label}")
 
         <StatusBar 
           isConnected={isConnected} 
-          stats={stats} 
+          stats={stats}
+          systemInfo={systemInfo}
+          switchDevice={switchDevice}
           nodeCount={nodes.length} 
           edgeCount={edges.length} 
         />

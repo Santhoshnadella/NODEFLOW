@@ -1,3 +1,37 @@
+# ── Python 3.9 compatibility fixes (must be FIRST, before any other imports) ─
+import warnings
+import sys
+
+# 1. Suppress google-api-core FutureWarning about unsupported Python 3.9
+warnings.filterwarnings("ignore", category=FutureWarning, module="google")
+# Also suppress the broader non-supported version messages from any package
+warnings.filterwarnings("ignore", message=".*non-supported Python version.*")
+
+# 2. Backport importlib.metadata.packages_distributions for Python < 3.10
+#    Several packages (pip, ultralytics, transformers) call this at import time.
+import importlib.metadata as _ilm
+
+if not hasattr(_ilm, "packages_distributions"):
+    def _packages_distributions_backport():
+        """Pure-Python backport of importlib.metadata.packages_distributions."""
+        mapping: dict = {}
+        for dist in _ilm.distributions():
+            try:
+                top = dist.read_text("top_level.txt")
+                if top:
+                    for pkg in top.splitlines():
+                        pkg = pkg.strip()
+                        if pkg:
+                            mapping.setdefault(pkg, []).append(
+                                dist.metadata.get("Name", "")
+                            )
+            except Exception:
+                pass
+        return mapping
+
+    _ilm.packages_distributions = _packages_distributions_backport  # type: ignore
+# ─────────────────────────────────────────────────────────────────────────────
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
 import json
@@ -19,6 +53,7 @@ from RestrictedPython import compile_restricted, safe_globals
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import copy
 import os
+import platform
 
 from nodes.math_nodes import (
     handle_scalar_math,
@@ -98,6 +133,40 @@ from nodes.specialty_nodes import (
 
 app = FastAPI()
 
+
+def detect_system() -> Dict[str, Any]:
+    """Detect available compute hardware and Python environment."""
+    info: Dict[str, Any] = {
+        "python_version": sys.version.split()[0],
+        "platform": platform.system(),
+        "gpu_available": False,
+        "gpu_name": None,
+        "gpu_vram_gb": 0.0,
+        "cuda_version": None,
+        "mps_available": False,
+        "preferred_device": "cpu",
+        "gpu_count": 0,
+    }
+
+    # CUDA / NVIDIA GPU
+    if torch.cuda.is_available():
+        info["gpu_available"] = True
+        info["gpu_count"] = torch.cuda.device_count()
+        info["gpu_name"] = torch.cuda.get_device_name(0)
+        props = torch.cuda.get_device_properties(0)
+        info["gpu_vram_gb"] = round(props.total_memory / (1024 ** 3), 1)
+        info["cuda_version"] = torch.version.cuda
+        info["preferred_device"] = "cuda"
+
+    # Apple MPS (M1/M2/M3)
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        info["mps_available"] = True
+        info["gpu_available"] = True
+        info["gpu_name"] = "Apple Silicon (MPS)"
+        info["preferred_device"] = "mps"
+
+    return info
+
 # Get token from environment if provided, or generate a fallback
 WS_TOKEN = os.getenv("NODEFLOW_WS_TOKEN", secrets.token_hex(16))
 print(f"WS_TOKEN_FOR_AUTHENTICATION={WS_TOKEN}")
@@ -114,11 +183,8 @@ app.add_middleware(
 
 class NodeFlowEngine:
     def __init__(self):
-        self.device = (
-            "cuda"
-            if torch.cuda.is_available()
-            else "mps" if torch.backends.mps.is_available() else "cpu"
-        )
+        self.system_info = detect_system()
+        self.device = self.system_info["preferred_device"]
         self.store = {}  # Stores real objects: DataFrames, Models, Tensors
         self.store_history = []  # For LRU eviction
         self.max_store_size = 20
@@ -127,7 +193,18 @@ class NodeFlowEngine:
         self.current_task = None
         self.registry: Dict[str, Callable] = {}
         self.setup_handlers()
-        print(f"🚀 NodeFlow Engine Ready | Device: {self.device}")
+        gpu_label = self.system_info.get("gpu_name") or "None"
+        print(f"🚀 NodeFlow Engine Ready | Device: {self.device} | GPU: {gpu_label} | Python: {self.system_info['python_version']}")
+
+    def switch_device(self, device: str) -> Dict[str, Any]:
+        """Hot-swap the active compute device (cuda / mps / cpu)."""
+        valid = ["cpu"]
+        if self.system_info["gpu_available"]:
+            valid.append(self.system_info["preferred_device"])  # cuda or mps
+        if device not in valid:
+            raise ValueError(f"Device '{device}' is not available. Available: {valid}")
+        self.device = device
+        return {"device": self.device, "gpu_name": self.system_info.get("gpu_name")}
 
 
     def _store_obj(self, key, obj):
@@ -752,12 +829,12 @@ class NodeFlowEngine:
             try:
                 # Real Hardware Stats via Torch
                 vram_used = 0.0
-                vram_total = 8.0
+                vram_total = self.system_info.get("gpu_vram_gb", 0.0) or 0.0
 
-                if torch.cuda.is_available():
-                    vram_used = torch.cuda.memory_allocated() / (1024**3)
-                    vram_total = torch.cuda.get_device_properties(0).total_memory / (
-                        1024**3
+                if self.device == "cuda" and torch.cuda.is_available():
+                    vram_used = round(torch.cuda.memory_allocated() / (1024 ** 3), 2)
+                    vram_total = round(
+                        torch.cuda.get_device_properties(0).total_memory / (1024 ** 3), 1
                     )
 
                 await websocket.send_text(
@@ -766,8 +843,13 @@ class NodeFlowEngine:
                             "type": "stats",
                             "data": {
                                 "device": self.device.upper(),
-                                "vram_used": round(vram_used, 2),
-                                "vram_total": round(vram_total, 2),
+                                "vram_used": vram_used,
+                                "vram_total": vram_total,
+                                "gpu_available": self.system_info["gpu_available"],
+                                "gpu_name": self.system_info.get("gpu_name"),
+                                "cuda_version": self.system_info.get("cuda_version"),
+                                "mps_available": self.system_info.get("mps_available", False),
+                                "python_version": self.system_info.get("python_version"),
                             },
                         }
                     )
@@ -879,6 +961,28 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif msg["type"] == "generate_pipeline":
                 await engine.handle_generate_pipeline(msg.get("prompt", ""), websocket)
+            elif msg["type"] == "get_system_info":
+                await websocket.send_text(json.dumps({
+                    "type": "system_info",
+                    "data": {
+                        **engine.system_info,
+                        "current_device": engine.device,
+                    }
+                }))
+            elif msg["type"] == "switch_device":
+                requested = msg.get("device", "cpu")
+                try:
+                    result = engine.switch_device(requested)
+                    await websocket.send_text(json.dumps({
+                        "type": "device_switched",
+                        "device": result["device"],
+                        "gpu_name": result["gpu_name"],
+                    }))
+                except ValueError as e:
+                    await websocket.send_text(json.dumps({
+                        "type": "device_switch_error",
+                        "error": str(e),
+                    }))
             elif msg["type"] == "stop_pipeline":
                 engine.cancel_event.set()
                 if engine.current_task:
