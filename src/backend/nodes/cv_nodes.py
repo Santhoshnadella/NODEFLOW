@@ -146,7 +146,7 @@ def handle_cv(engine, params, inputs):
 
         elif "sam" in op:
             try:
-                from segment_anything import sam_model_registry, SamPredictor
+                from segment_anything import sam_model_registry, SamPredictor  # type: ignore[import]
                 model_name = "sam"
                 if model_name not in engine._model_cache:
                     sam = sam_model_registry["vit_b"](checkpoint="models/sam_vit_b_01ec64.pth")
@@ -196,11 +196,11 @@ def handle_cv_backbone(engine, params, inputs):
 
     variant = params.get("variant", "resnet50").lower()
     if variant == "resnet50":
-        model = models.resnet50(pretrained=params.get("pretrained", True))
+        model = models.resnet50(weights="DEFAULT" if params.get("pretrained", True) else None)
     elif variant == "efficientnet":
-        model = models.efficientnet_b0(pretrained=params.get("pretrained", True))
+        model = models.efficientnet_b0(weights="DEFAULT" if params.get("pretrained", True) else None)
     else:
-        model = models.resnet18(pretrained=params.get("pretrained", True))
+        model = models.resnet18(weights="DEFAULT" if params.get("pretrained", True) else None)
     model.eval()
     ref = f"model_{id(model)}"
     engine.store[ref] = model
