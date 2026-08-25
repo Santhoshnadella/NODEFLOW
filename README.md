@@ -4,11 +4,11 @@ NodeFlow is a powerful, visually stunning desktop application designed for local
 
 ## 📸 Interface Preview
 <div align="center">
-  <img src="assets/home.png" alt="NodeFlow Home Screen" width="800"/>
+  <img src="assets/home.jpeg" alt="NodeFlow Home Screen" width="800"/>
   <br/><br/>
-  <img src="assets/library.png" alt="Node Library and Canvas" width="800"/>
+  <img src="assets/library.jpeg" alt="Node Library and Canvas" width="800"/>
   <br/><br/>
-  <img src="assets/canvas.png" alt="Complex Pipeline Architecture" width="800"/>
+  <img src="assets/canvas.jpeg" alt="Complex Pipeline Architecture" width="800"/>
 </div>
 
 ---
