@@ -9,6 +9,18 @@ from RestrictedPython import compile_restricted, safe_globals
 def handle_specialty(engine, params, inputs):
     op = params.get("label", "").lower()
     
+    if "inline python code" in op:
+        code_str = params.get("code", "")
+        in1 = inputs.get("in1")
+        in2 = inputs.get("in2")
+        try:
+            byte_code = compile_restricted(code_str, '<inline>', 'exec')
+            loc = {'in1': in1, 'in2': in2}
+            exec(byte_code, safe_globals, loc)
+            return {"out": loc.get('out', None)}
+        except Exception as e:
+            raise Exception(f"Python Execution Error: {str(e)}")
+
     try:
         if "gcn" in op or "graphsage" in op:
             class SimpleGraphConv(nn.Module):

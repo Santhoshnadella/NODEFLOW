@@ -23,6 +23,29 @@ export const NODE_CATEGORIES = [
 ];
 
 export const NODE_TEMPLATES = [
+
+  { type: 'baseNode', label: 'Macro Node', category: 'advanced', data: { label: 'Macro Node', inputs: [], outputs: [], parameters: {} } },
+  { type: 'baseNode', label: 'Webcam Stream', category: 'specialty', data: { label: 'Webcam Stream', inputs: [], outputs: [{id:'video', label:'Video', type:'tensor'}], parameters: {} } },
+  { type: 'baseNode', label: '3D Visualizer', category: 'specialty', data: { label: '3D Visualizer', inputs: [{id:'mesh', label:'Mesh', type:'tensor'}], outputs: [], parameters: {} } },
+  { type: 'baseNode', label: 'Whisper Mic', category: 'specialty', data: { label: 'Whisper Mic', inputs: [], outputs: [{id:'text', label:'Text', type:'string'}], parameters: {} } },
+  { type: 'baseNode', label: 'RAG Retriever', category: 'advanced', data: { label: 'RAG Retriever', inputs: [{id:'query', label:'Query', type:'string'}], outputs: [{id:'docs', label:'Docs', type:'any'}], parameters: {} } },
+  { type: 'baseNode', label: 'Cloud Burst Target', category: 'scale', data: { label: 'Cloud Burst Target', inputs: [{id:'in', label:'in', type:'tensor'}], outputs: [{id:'out', label:'out', type:'tensor'}], parameters: { provider: 'RunPod' } } },
+    
+  { 
+    type: 'baseNode', label: 'Inline Python Code', category: 'advanced', 
+    data: { 
+      label: 'Inline Python Code', category: 'advanced', 
+      inputs: [{id:'in1', label:'in1', type:'any'}, {id:'in2', label:'in2', type:'any'}], 
+      outputs: [{id:'out', label:'out', type:'any'}],
+      parameters: { code: 'def compute(in1, in2):\n    # Write Python code here\n    return in1' },
+      explanation: {
+        what: "Executes custom Python code on the fly.",
+        how: "It runs the code you provide inside a safe environment.",
+        gives: "Whatever your code returns.",
+        analogy: "Like writing your own rulebook for a game."
+      }
+    } 
+  },
   // --- 1. MATH & STATISTICS ---
   { 
     type: 'baseNode', label: 'Vector Ops', category: 'math', 

@@ -174,6 +174,20 @@ const BaseNode = ({ id, data, selected }: { id: string, data: any, selected: boo
       );
     }
 
+    if (key === 'code') {
+      return (
+        <div style={{ padding: '4px 0' }} onClick={e => e.stopPropagation()}>
+          <textarea 
+            value={String(value)} 
+            style={{ width: '150px', height: '100px', background: 'var(--bg4)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '9px', fontFamily: 'var(--font-mono)', padding: '4px', borderRadius: '4px', resize: 'both' }}
+            onChange={(e) => handleParameterChange(key, e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+            placeholder="def compute(in1, in2):&#10;  return in1 + in2"
+          />
+        </div>
+      );
+    }
+
     return (
       <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
         <input 
