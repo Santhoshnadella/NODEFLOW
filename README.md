@@ -17,6 +17,16 @@ NodeFlow democratizes access to complex ML and AI workflows by turning code into
 
 ---
 
+## 🌟 NodeFlow 2.0 Features (New!)
+
+We've recently deployed the massive 2.0 architectural update, bringing bleeding-edge capabilities to the canvas:
+- **Inline Python Execution:** Write custom, arbitrary Python scripts directly inside nodes on the canvas. The backend uses `RestrictedPython` to safely parse and execute your logic without needing to build a custom node.
+- **Plugin Registry:** A built-in `/plugins` FastAPI endpoint and SQLite schema allowing for hot-reloading community-developed nodes (like Medical Imaging or Crypto Trading packs).
+- **Macro Nodes:** Support for visually collapsing massive sub-graphs into a single, clean node block.
+- **Advanced Nodes Scaffolded:** The UI now supports dragging and dropping **Webcam Streams**, **3D Visualizers**, **Whisper Microphones**, **RAG Retrievers**, and **Cloud Burst Targets**.
+
+---
+
 ## 🧩 Node Library Scale
 
 NodeFlow currently features a massive built-in library of **241 distinct nodes** organized into **14 functional categories**, allowing for nearly infinite combinations of ML architectures:
