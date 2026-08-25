@@ -2,6 +2,15 @@
 
 NodeFlow is a powerful, visually stunning desktop application designed for local-first AI and machine learning. Built for everyone from data scientists to students, it allows you to build complex AI pipelines using a drag-and-drop interface—**100% locally with zero cloud dependencies.**
 
+## 📸 Interface Preview
+<div align="center">
+  <img src="assets/home.png" alt="NodeFlow Home Screen" width="800"/>
+  <br/><br/>
+  <img src="assets/library.png" alt="Node Library and Canvas" width="800"/>
+  <br/><br/>
+  <img src="assets/canvas.png" alt="Complex Pipeline Architecture" width="800"/>
+</div>
+
 ---
 
 ## 🚀 What NodeFlow Can Do
